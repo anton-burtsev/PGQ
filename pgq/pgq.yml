@@ -1,0 +1,61 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgq
+  labels:
+    app: pgq
+spec:
+  selector:
+    matchLabels:
+      app: pgq
+  template:
+    metadata:
+      labels:
+        app: pgq
+    spec:
+      #volumes:
+      #- name: pg-mem-data
+      #  emptyDir:
+      #    medium: Memory
+      containers:
+      - name: pgq
+        image: antonburtsev/pgq
+        #image: pgq:latest
+        #imagePullPolicy: Never
+        ports:
+        - containerPort: 80
+      - name: pg
+        image: postgres
+        #volumeMounts:
+        #- name: pg-mem-data
+        #  mountPath: /var/lib/postgresql/data
+        args: ["-B", "1GB"] #args: ["-F", "-B", "1GB"]
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          value: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgq-ext
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    nodePort: 30301
+  selector:
+    app: pgq
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-ext
+spec:
+  type: NodePort
+  ports:
+  - port: 5432
+    nodePort: 30302
+  selector:
+    app: pgq
