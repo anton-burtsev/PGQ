@@ -1,6 +1,5 @@
 ﻿using Npgsql;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -123,8 +122,6 @@ namespace pgq2
                 }
             }
 
-            return;
-
             try
             {
                 using var con = new NpgsqlConnection(pgConn);
@@ -161,22 +158,6 @@ create index ix_queue_get_part on queue(queue_name, status, partition_name, crea
 create index ix_queue_get_sel on queue(queue_name, status, selector, created);
 create index ix_queue_get_part_sel on queue(queue_name, status, partition_name, selector, created);
 create index ix_queue_message_id on queue(message_id);
-
-create table queue2(
-	queue_name varchar,
-	partition_name varchar,
-	selector varchar,
-	status int default 0,
-	message_id uuid,
-	created timestamp default current_timestamp
-);
-
-create index ix_queue2_get_name on queue(queue_name, status, created);
-create index ix_queue2_get_part on queue(queue_name, status, partition_name, created);
-create index ix_queue2_get_sel on queue(queue_name, status, selector, created);
-create index ix_queue2_get_part_sel on queue(queue_name, status, partition_name, selector, created);
-create index ix_queue2_message_id on queue(message_id);
-
 ";
 
     }

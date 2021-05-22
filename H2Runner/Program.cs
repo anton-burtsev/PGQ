@@ -17,7 +17,6 @@ namespace H2Runner
         {
             Console.Write("warming up... ");
             var pgq = new PgqClient(endpoint);
-            //var pgq = new PgqClient(endpoint));
             await pgq.Get("warmup");
             Console.WriteLine("started!");
 
