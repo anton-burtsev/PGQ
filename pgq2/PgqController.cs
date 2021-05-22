@@ -1,48 +1,12 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Npgsql;
+﻿using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
-namespace pgq
+namespace pgq2
 {
-    [Route("api/[Controller]")]
-    [ApiController]
-    public class pgqController : ControllerBase
-    {
-        static readonly RequestProcessor ctrl = new();
-
-        [HttpGet]
-        [Route("get")]
-        public async Task<Guid> Get([BindRequired] string queueName, string partitionName, string selector)
-        {
-            //await Task.Delay(1);
-            //return Guid.NewGuid();
-            return await ctrl.Get(new MsgKey { QueueName = queueName, Partition = partitionName, Selector = selector });
-        }
-        [HttpGet]
-        [Route("ack")]
-        public async Task<bool> Ack([BindRequired] Guid messageId) => await ctrl.Ack(messageId);
-
-        [HttpGet]
-        [Route("put")]
-        public async Task<bool> Put([BindRequired] string queueName, string partitionName, string selector, [BindRequired] Guid messageId, string payload)
-        {
-            //await Task.Delay(1);
-            //return true;
-            return await ctrl.Put(new Msg
-            {
-                Key = new MsgKey { QueueName = queueName, Partition = partitionName, Selector = selector },
-                ID = messageId
-            });
-        }
-    }
-
-
     public class BatchQueue
     {
         readonly Queue<List<GetRequest>> queue = new();
@@ -114,7 +78,7 @@ namespace pgq
 
     public class RequestProcessor
     {
-        BatchQueue bukets = new BatchQueue();
+        readonly BatchQueue bukets = new();
 
         public RequestProcessor()
         {
@@ -127,8 +91,9 @@ namespace pgq
             Task.Factory.StartNew(PutWorker, TaskCreationOptions.LongRunning);
             Task.Factory.StartNew(PutWorker, TaskCreationOptions.LongRunning);
 
-            Task.Factory.StartNew(AckWorker);
-            Task.Factory.StartNew(AckWorker);
+            Task.Factory.StartNew(AckWorker, TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(AckWorker, TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(AckWorker, TaskCreationOptions.LongRunning);
         }
 
         public async Task<Guid> Get(MsgKey key)
@@ -152,10 +117,16 @@ namespace pgq
             return await w;
         }
 
+        public static string GetConnectionString()
+        {
+            var pg = Environment.GetEnvironmentVariable("PGCONNSTR");
+            if (!string.IsNullOrWhiteSpace(pg)) return pg;
+            return "Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres;";
+        }
+
         public async Task AckWorker()
         {
-            //var rnd = new Random();
-            using var con = new NpgsqlConnection(Program.pgConn);
+            using var con = new NpgsqlConnection(GetConnectionString());
             con.Open();
             while (true)
             {
@@ -171,8 +142,6 @@ namespace pgq
                     ackTcs = new TaskCompletionSource<bool>();
                 }
 
-                //if (rnd.NextDouble() < 0.01)
-                //    Console.WriteLine(batch.Count);
                 await Ack(batch, con);
                 tcs.SetResult(true);
             }
@@ -207,7 +176,7 @@ namespace pgq
             try
             {
                 var rnd = new Random();
-                using var con = new NpgsqlConnection(Program.pgConn);
+                using var con = new NpgsqlConnection(GetConnectionString());
                 con.Open();
                 while (true)
                 {
@@ -223,8 +192,6 @@ namespace pgq
                         putTcs = new TaskCompletionSource<bool>();
                     }
 
-                    //if (rnd.NextDouble() < 0.01)
-                    //    Console.WriteLine(batch.Count);
                     await Put(batch, con);
                     tcs.SetResult(true);
                 }
@@ -237,34 +204,14 @@ namespace pgq
 
         public async Task Put(IEnumerable<Msg> batch)
         {
-            using var con = new NpgsqlConnection(Program.pgConn);
+            using var con = new NpgsqlConnection(GetConnectionString());
             con.Open();
             await Put(batch, con);
             con.Close();
         }
         async Task Put(IEnumerable<Msg> batch, NpgsqlConnection con)
         {
-            return;
-            var table = rnd.NextDouble() < 0.5 ? "queue" : "queue2";
-            //using var cmd = con.CreateCommand();
-            //var sb = new StringBuilder($"insert into {table}(queue_name, partition_name, selector, message_id) values");
-            //var i = 0;
-            //foreach (var m in batch)
-            //{
-            //    if (i > 0) sb.Append(',');
-            //    sb.Append($"('{m.Key.QueueName}','{m.Key.Partition}','{m.Key.Selector}','{m.ID}')");
-            //    i++;
-            //}
-            ////Console.WriteLine(i);
-
-            //cmd.CommandText = sb.ToString();
-
-            //await cmd.ExecuteNonQueryAsync();
-
-            // to do: use binary writer
-            var i = 0;
-            var sw = Stopwatch.StartNew();
-            using var w = await con.BeginBinaryImportAsync($"COPY {table}(queue_name, partition_name, selector, message_id) FROM STDIN (FORMAT BINARY)");
+            using var w = await con.BeginBinaryImportAsync("COPY queue(queue_name, partition_name, selector, message_id) FROM STDIN (FORMAT BINARY)");
             foreach (var m in batch)
             {
                 w.StartRow();
@@ -272,20 +219,13 @@ namespace pgq
                 w.Write(m.Key.Partition);
                 w.Write(m.Key.Selector);
                 w.Write(m.ID);
-                i++;
             }
             await w.CompleteAsync();
-            Console.WriteLine($"PUT: {i}\t{sw.ElapsedMilliseconds}");
-
-
-            //using var writer = await con.BeginTextImportAsync("COPY queue(queue_name, partition_name, selector, message_id) FROM STDIN");
-            //foreach (var m in batch)
-            //    await writer.WriteLineAsync($"{m.Key.QueueName}\t{m.Key.Partition}\t{m.Key.Selector}\t{m.ID}");
         }
 
         async Task GetWorker()
         {
-            using var con = new NpgsqlConnection(Program.pgConn);
+            using var con = new NpgsqlConnection(GetConnectionString());
             con.Open();
 
             while (true)
@@ -299,21 +239,18 @@ namespace pgq
             }
         }
 
-        Random rnd = new Random();
+        //Random rnd = new Random();
         async Task<List<Guid>> TakeFromDB(NpgsqlConnection con, MsgKey key, int Count)
         {
-            return new List<Guid>();
-
             var sw = Stopwatch.StartNew();
 
-            var table = rnd.NextDouble() < 0.5 ? "queue" : "queue2";
             var cl = new StringBuilder();
             if (key.Partition != null) cl.Append("and partition_name = @partition_name ");
             if (key.Selector != null) cl.Append("and selector like @selector ");
             using var cmd = con.CreateCommand();
             cmd.CommandText = $@"
-            update {table} set status = 1 where message_id in (
-            	select message_id from {table}  where queue_name = @queue_name and status = 0
+            update queue set status = 1 where message_id in (
+            	select message_id from queue where queue_name = @queue_name and status = 0
                 {cl}
                 order by created
                 for update skip locked
@@ -335,7 +272,7 @@ namespace pgq
                 m.Add((Guid)r[0]);
             r.Close();
 
-            Console.WriteLine($"GET: {Count}\t{sw.ElapsedMilliseconds}");
+            //Console.WriteLine($"GET: {Count}\t{sw.ElapsedMilliseconds}");
 
             return m;
         }

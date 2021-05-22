@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,12 +46,27 @@ namespace pgq
 
             app.UseRouting();
 
-            app.UseAuthorization();
+            //app.UseAuthorization();
 
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
             });
+
+            app.Use(async (context, next) =>
+            {
+                context.Response.Headers["qwe"] = "asd";
+                //context.Response.OnStarting(async o => {
+                //    if (o is HttpContext ctx)
+                //    {
+                //        ctx.Response.Headers["Connection"] = "upgrade";
+                //        ctx.Response.Headers["Upgrade"] = "HTTP/2.0";
+                //    }
+                //}, context);
+                await next();
+            });
         }
     }
 }
+// Connection: upgrade
+//Upgrade: HTTP / 2.0, SHTTP / 1.3, IRC / 6.9, RTA / x11
