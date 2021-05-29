@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Net;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace pgq2
@@ -13,12 +16,12 @@ namespace pgq2
 
     public class PgqClient
     {
-        SocketStream stream;
-        object writeLock = new();
+        Stream stream;
         Dictionary<Guid, Request> requests = new();
         BColl<Request> rqueue = new();
         public PgqClient(IPEndPoint ep)
         {
+            //stream = new CStream(new SocketStream(ep));
             stream = new SocketStream(ep);
             _ = Task.Factory.StartNew(() => {
                 while (true)
@@ -39,15 +42,15 @@ namespace pgq2
                 {
                     try
                     {
-                        var reqs = rqueue.Take(16);
+                        var reqs = rqueue.Take(1000);
+                        //Console.WriteLine(reqs.Length);
                         foreach (var r in reqs)
                             lock (requests)
                                 requests[r.Msg.ID] = r;
                         foreach (var r in reqs)
-                            lock (writeLock)
-                                stream.WriteJ(r.Msg);
-
-                        stream.Flush();
+                            stream.WriteJ(r.Msg);
+                        if (rqueue.Count == 0)
+                            stream.Flush();
                     }
                     catch (Exception e)
                     { Console.WriteLine(e); }
@@ -79,6 +82,16 @@ namespace pgq2
                 request.Msg.Params["partition"] = partition;
             if (!string.IsNullOrWhiteSpace(selector))
                 request.Msg.Params["selector"] = selector;
+            rqueue.Add(request);
+
+            var response = await request.Tcs.Task;
+            return bool.Parse(response.Params["result"]);
+        }
+        public async Task<bool> Ack(Guid messageId)
+        {
+            var request = new Request { Msg = new Message { ID = Guid.NewGuid() } };
+            request.Msg.Params["method"] = "ack";
+            request.Msg.Params["messageId"] = messageId.ToString();
             rqueue.Add(request);
 
             var response = await request.Tcs.Task;

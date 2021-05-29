@@ -1,5 +1,6 @@
 ﻿using Npgsql;
 using System;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -11,24 +12,29 @@ namespace pgq2
 {
     class PgqServer
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             Init();
 
-            var ctrl = new RequestProcessor();
+            var ctrlPut = new PutProcessor(3);
+            var ctrlGet = new GetProcessor(8);
+            var ctrlAck = new AckProcessor(3);
+            TaskCompletionSource tcs = new();
             var ss = new SocketServer(new IPEndPoint(IPAddress.Any, 88));
-            _ = Task.Factory.StartNew(async () =>
+            await Task.Factory.StartNew(async () =>
             {
                 while (true)
                 {
-                    var client = await ss.AcceptAsync();
+                    //var stream = new CStream(await ss.AcceptAsync());
+                    var stream = await ss.AcceptAsync();
+
                     var requestQueue = new BColl<Message>();
                     var responseQueue = new BColl<Message>();
                     _ = Task.Factory.StartNew(() =>
                     {
                         while (true)
                         {
-                            var m = client.ReadJ<Message>();
+                            var m = stream.ReadJ<Message>();
                             requestQueue.Add(m);
                         }
                     }, TaskCreationOptions.LongRunning);
@@ -37,9 +43,12 @@ namespace pgq2
                     {
                         while (true)
                         {
-                            foreach (var m in responseQueue.Take(16))
-                                client.WriteJ(m);
-                            client.Flush();
+                            var r = responseQueue.Take(1000);
+                            //Console.WriteLine(r.Length);
+                            foreach (var m in r)
+                                stream.WriteJ(m);
+                            if (responseQueue.Count == 0)
+                                stream.Flush();
                         }
                     }, TaskCreationOptions.LongRunning);
 
@@ -50,7 +59,7 @@ namespace pgq2
                             var req = requestQueue.Take();
                             if (req.Params["method"] == "get")
                             {
-                                ctrl
+                                ctrlGet
                                     .Get(new MsgKey
                                     {
                                         QueueName = req.Params["queueName"],
@@ -65,7 +74,7 @@ namespace pgq2
                             }
                             if (req.Params["method"] == "put")
                             {
-                                ctrl
+                                ctrlPut
                                     .Put(new Msg
                                     {
                                         Key = new MsgKey
@@ -82,19 +91,28 @@ namespace pgq2
                                         responseQueue.Add(resp);
                                     });
                             }
+                            if (req.Params["method"] == "ack")
+                            {
+                                ctrlAck
+                                    .Ack(Guid.Parse(req.Params["messageId"]))
+                                    .ContinueWith(t => {
+                                        var resp = new Message { ID = req.ID };
+                                        resp.Params["result"] = t.Result.ToString();
+                                        responseQueue.Add(resp);
+                                    });
+                            }
                         }
                     }, TaskCreationOptions.LongRunning);
                 }
             });
-
-            while (true) Thread.Sleep(100);
+            await tcs.Task;
         }
 
         static void Init()
         {
             Console.WriteLine("VER 14 no sync commit - session");
 
-            var pgConn = RequestProcessor.GetConnectionString();
+            var pgConn = ReqProcessor.GetConnectionString();
 
             while (true)
             {
@@ -126,13 +144,14 @@ namespace pgq2
             {
                 using var con = new NpgsqlConnection(pgConn);
                 con.Open();
-                InitSQL.Split(";").ToList().ForEach(sql =>
+                TableSQL.Split(";").ToList().ForEach(sql =>
                 {
                     if (string.IsNullOrWhiteSpace(sql)) return;
                     using var cmd = con.CreateCommand();
                     cmd.CommandText = sql;
                     cmd.ExecuteNonQuery();
                 });
+
                 con.Close();
                 Console.WriteLine("NPGSQL CONNECTED");
             }
@@ -143,7 +162,7 @@ namespace pgq2
             }
         }
 
-        const string InitSQL = @"
+        const string TableSQL = @"
 create table queue(
 	queue_name varchar,
 	partition_name varchar,

@@ -16,7 +16,7 @@ spec:
       containers:
       - name: pg
         image: postgres
-        args: ["-B", "4GB"]
+        args: ["-B", "24GB"]
         ports:
         - containerPort: 5432
         env:
@@ -24,10 +24,10 @@ spec:
           value: postgres
       - name: pgq
         image: antonburtsev/pgq2
-        #image: pgq:latest
-        #imagePullPolicy: Never
         ports:
         - containerPort: 88
+      - name: h2
+        image: antonburtsev/h2runner
 ---
 apiVersion: v1
 kind: Service

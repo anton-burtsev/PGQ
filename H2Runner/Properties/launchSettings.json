@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "H2Runner": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}

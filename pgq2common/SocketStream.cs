@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -69,6 +70,7 @@ namespace pgq2
                 read_pos = 0;
                 //read_size = stream.Read(read_buf, 0, BufferSize);
                 read_size = client.Receive(read_buf, 0, BufferSize, SocketFlags.None);
+                if (read_size <= 0) return 0;
                 return Read(buffer, offset, count);
             }
         }
@@ -281,4 +283,36 @@ namespace pgq2
         public void Dispose() => disposing = true;
     }
 
+
+    public class CStream : Stream
+    {
+        readonly Stream baseStream;
+        readonly DeflateStream reader;
+        readonly DeflateStream writer;
+
+        public CStream(Stream stream)
+        {
+            baseStream = stream;
+            writer = new DeflateStream(stream, CompressionLevel.Fastest, leaveOpen: true);
+            reader = new DeflateStream(stream, CompressionMode.Decompress, leaveOpen: true);
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotImplementedException();
+        public override long Position { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotImplementedException();
+        public override void SetLength(long value) => throw new NotImplementedException();
+
+        public override int Read(byte[] buffer, int offset, int count) => reader.Read(buffer, offset, count);
+        public override void Write(byte[] buffer, int offset, int count) => writer.Write(buffer, offset, count);
+        public override void Flush()
+        {
+            writer.Flush();
+            baseStream.Flush();
+        }
+
+    }
 }
