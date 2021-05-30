@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -96,6 +97,43 @@ namespace pgq2
 
             var response = await request.Tcs.Task;
             return bool.Parse(response.Params["result"]);
+        }
+    }
+
+    public class AggPgqClient
+    {
+        readonly PgqClient[] clients;
+        public AggPgqClient(params PgqClient[] clients)
+        {
+            this.clients = clients;
+        }
+
+        readonly Random rnd = new ();
+        public async Task<bool> Put(string queueName, string partition, string selector, Guid messageId)
+        {
+            return await clients[rnd.Next(clients.Length)].Put(queueName, partition, selector, messageId);
+        }
+
+        public async Task<Guid> Get(string queueName, string partition = null, string selector = null)
+        {
+            var f = rnd.Next(clients.Length);
+            for (var i = 0; i < clients.Length; i++)
+            {
+                var m = await clients[(i + f) % clients.Length].Get(queueName, partition, selector);
+                if (m != Guid.Empty) return m;
+            }
+            return Guid.Empty;
+        }
+
+        public async Task<bool> Ack(Guid messageId)
+        {
+            var t = clients.Select(c => c.Ack(messageId)).ToArray();
+            return (await Task.WhenAll(t)).All(r=>r);
+        }
+
+        public async Task Warmup()
+        {
+            await Get("warmup");
         }
     }
 }

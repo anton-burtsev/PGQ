@@ -1,0 +1,52 @@
+﻿apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: pgq
+  name: pod-reader
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: application-sa
+  namespace: pgq
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: allow-pod-reading
+  namespace: pgq
+subjects:
+- kind: ServiceAccount
+  name: application-sa 
+  namespace: pgq
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h2
+  labels:
+    app: h2
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: h2
+  template:
+    metadata:
+      labels:
+        app: h2
+    spec:
+      serviceAccountName: application-sa
+      nodeSelector:
+        pgq: runner
+      containers:
+      - name: h2
+        image: antonburtsev/h2

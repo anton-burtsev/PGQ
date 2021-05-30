@@ -1,4 +1,5 @@
-﻿using pgq2;
+﻿using k8s;
+using pgq2;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -14,8 +15,36 @@ namespace H2Runner
     {
         static IPEndPoint endpoint = new IPEndPoint(IPAddress.Loopback, 88);
         //static IPEndPoint endpoint = new IPEndPoint(IPAddress.Parse("5.188.116.109"), 30388);
+        static IPEndPoint[] pgqList = new[] { new IPEndPoint(IPAddress.Loopback, 88) };
         static async Task Main(string[]args)
         {
+            var cubePods = new List<string>();
+            if (KubernetesClientConfiguration.IsInCluster())
+            {
+                var config = KubernetesClientConfiguration.BuildDefaultConfig();
+                var client = new Kubernetes(config);
+                var list = client.ListNamespacedPod("pgq");
+                foreach (var item in list.Items)
+                    if (item.Metadata.Name.StartsWith("pgq-"))
+                        cubePods.Add(item.Status.PodIP);
+                pgqList = cubePods.Select(ip => new IPEndPoint(IPAddress.Parse(ip), 88)).ToArray();
+            }
+
+            var pgqs = Environment.GetEnvironmentVariable("H2R_PGQ_LIST");
+            if (!string.IsNullOrWhiteSpace(pgqs))
+                pgqList = pgqs
+                    .Split(',', ';', ' ', '\r', '\n', '\t')
+                    .Where(c => !string.IsNullOrWhiteSpace(c))
+                    .Select(c => {
+                        var parts = c.Split(':');
+                        var host = parts[0];
+                        Console.WriteLine(host);
+                        return new IPEndPoint(Dns.GetHostAddresses(host)[0], int.Parse(parts[1]));
+                    })
+                    .ToArray();
+
+            foreach (var ep in pgqList)
+                Console.WriteLine("connecting to " + ep);
 
             var bGet = true;
             var bPut = true;
@@ -28,13 +57,13 @@ namespace H2Runner
             if (args.Length > 1) totalRps = int.Parse(args[1]);
 
             Console.Write("warming up... ");
-            var pgq = new PgqClient(endpoint);
-            await pgq.Get("warmup");
+            var pgq = new AggPgqClient(pgqList.Select(ep=> new PgqClient(ep)).ToArray());
+            await pgq.Warmup();
             Console.WriteLine("started!");
 
             var t = new List<Task>();
             if (bGet) t.Add(TestGet());
-            if (bPut) t.Add(TestPut());
+            if (bPut) t.Add(TestPut()); 
 
             Console.ReadLine();
             go_on = false;
@@ -47,7 +76,7 @@ namespace H2Runner
         static async Task TestGet()
         {
             var sw = Stopwatch.StartNew();
-            var pgq = new PgqClient(endpoint);
+            var pgq = new AggPgqClient(pgqList.Select(ep=> new PgqClient(ep)).ToArray());
             var lens = new List<TimeSpan>();
             var z = 0;
             var empty = 0;
@@ -90,7 +119,7 @@ namespace H2Runner
         static async Task TestPut()
         {
             var sw = Stopwatch.StartNew();
-            var pgq = new PgqClient(endpoint);
+            var pgq = new AggPgqClient(pgqList.Select(ep=> new PgqClient(ep)).ToArray());
             var lens = new List<TimeSpan>();
             var z = 0;
             var rps = new RpsMeter();

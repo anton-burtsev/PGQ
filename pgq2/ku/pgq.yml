@@ -1,0 +1,31 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgq
+  labels:
+    app: pgq
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: pgq
+  template:
+    metadata:
+      labels:
+        app: pgq
+    spec:
+      nodeSelector:
+        pgq: data
+      containers:
+      - name: pg
+        image: postgres
+        args: ["-B", "16GB"]
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          value: postgres
+      - name: pgq
+        image: antonburtsev/pgq2
+        ports:
+        - containerPort: 88
