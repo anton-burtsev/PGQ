@@ -29,13 +29,14 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: h2
   labels:
     app: h2
 spec:
-  replicas: 3
+  replicas: 2
+  serviceName: h2
   selector:
     matchLabels:
       app: h2

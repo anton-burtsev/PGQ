@@ -16,36 +16,31 @@ namespace pgq2
         {
             Init();
 
-            var ctrlPut = new PutProcessor(3);
-            var ctrlGet = new GetProcessor(8);
-            var ctrlAck = new AckProcessor(3);
+            var ctrlPut = new PutProcessor(1);
+            var ctrlGet = new GetProcessor(3);
+            var ctrlAck = new AckProcessor(1);
             TaskCompletionSource tcs = new();
             var ss = new SocketServer(new IPEndPoint(IPAddress.Any, 88));
             await Task.Factory.StartNew(async () =>
             {
                 while (true)
                 {
-                    //var stream = new CStream(await ss.AcceptAsync());
-                    var stream = await ss.AcceptAsync();
+                    var stream = new CStream(await ss.AcceptAsync());
+                    //var stream = await ss.AcceptAsync();
 
                     var requestQueue = new BColl<Message>();
                     var responseQueue = new BColl<Message>();
                     _ = Task.Factory.StartNew(() =>
                     {
                         while (true)
-                        {
-                            var m = stream.ReadJ<Message>();
-                            requestQueue.Add(m);
-                        }
+                            requestQueue.Add(stream.ReadJ<Message>());
                     }, TaskCreationOptions.LongRunning);
 
                     _ = Task.Factory.StartNew(() =>
                     {
                         while (true)
                         {
-                            var r = responseQueue.Take(1000);
-                            //Console.WriteLine(r.Length);
-                            foreach (var m in r)
+                            foreach (var m in responseQueue.Take(1000))
                                 stream.WriteJ(m);
                             if (responseQueue.Count == 0)
                                 stream.Flush();

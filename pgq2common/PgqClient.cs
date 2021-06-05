@@ -22,8 +22,8 @@ namespace pgq2
         BColl<Request> rqueue = new();
         public PgqClient(IPEndPoint ep)
         {
-            //stream = new CStream(new SocketStream(ep));
-            stream = new SocketStream(ep);
+            stream = new CStream(new SocketStream(ep));
+            //stream = new SocketStream(ep);
             _ = Task.Factory.StartNew(() => {
                 while (true)
                 {
@@ -44,7 +44,6 @@ namespace pgq2
                     try
                     {
                         var reqs = rqueue.Take(1000);
-                        //Console.WriteLine(reqs.Length);
                         foreach (var r in reqs)
                             lock (requests)
                                 requests[r.Msg.ID] = r;
@@ -102,17 +101,13 @@ namespace pgq2
 
     public class AggPgqClient
     {
+        readonly Random rnd = new();
         readonly PgqClient[] clients;
-        public AggPgqClient(params PgqClient[] clients)
-        {
-            this.clients = clients;
-        }
 
-        readonly Random rnd = new ();
+        public AggPgqClient(params PgqClient[] clients) => this.clients = clients;
+
         public async Task<bool> Put(string queueName, string partition, string selector, Guid messageId)
-        {
-            return await clients[rnd.Next(clients.Length)].Put(queueName, partition, selector, messageId);
-        }
+            => await GetBucket(messageId).Put(queueName, partition, selector, messageId);
 
         public async Task<Guid> Get(string queueName, string partition = null, string selector = null)
         {
@@ -126,14 +121,11 @@ namespace pgq2
         }
 
         public async Task<bool> Ack(Guid messageId)
-        {
-            var t = clients.Select(c => c.Ack(messageId)).ToArray();
-            return (await Task.WhenAll(t)).All(r=>r);
-        }
+            => await GetBucket(messageId).Ack(messageId);
 
-        public async Task Warmup()
-        {
-            await Get("warmup");
-        }
+        public async Task Warmup()=> await Get("warmup");
+
+        PgqClient GetBucket(Guid messageId) =>
+            clients[Math.Abs(messageId.GetHashCode()) % clients.Length];
     }
 }

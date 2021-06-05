@@ -14,8 +14,12 @@ namespace H2Runner
     class TestRunner
     {
         static IPEndPoint endpoint = new IPEndPoint(IPAddress.Loopback, 88);
-        //static IPEndPoint endpoint = new IPEndPoint(IPAddress.Parse("5.188.116.109"), 30388);
-        static IPEndPoint[] pgqList = new[] { new IPEndPoint(IPAddress.Loopback, 88) };
+        static IPEndPoint[] pgqList = new[] {
+            new IPEndPoint(IPAddress.Loopback, 88),
+            new IPEndPoint(IPAddress.Loopback, 88),
+            new IPEndPoint(IPAddress.Loopback, 88),
+            new IPEndPoint(IPAddress.Loopback, 88),
+        };
         static async Task Main(string[]args)
         {
             var cubePods = new List<string>();
@@ -23,11 +27,11 @@ namespace H2Runner
             {
                 var config = KubernetesClientConfiguration.BuildDefaultConfig();
                 var client = new Kubernetes(config);
-                var list = client.ListNamespacedPod("pgq");
-                foreach (var item in list.Items)
-                    if (item.Metadata.Name.StartsWith("pgq-"))
-                        cubePods.Add(item.Status.PodIP);
-                pgqList = cubePods.Select(ip => new IPEndPoint(IPAddress.Parse(ip), 88)).ToArray();
+                pgqList = client.ListNamespacedPod("pgq").Items
+                    .Where(i => i.Metadata.Name.StartsWith("pgq-"))
+                    .OrderBy(i => i.Metadata.Name)
+                    .Select(i => new IPEndPoint(IPAddress.Parse(i.Status.PodIP), 88))
+                    .ToArray();
             }
 
             var pgqs = Environment.GetEnvironmentVariable("H2R_PGQ_LIST");
@@ -70,7 +74,7 @@ namespace H2Runner
             await Task.WhenAll(t);
         }
 
-        static int totalRps = 5_000; // total number of full rounds (PUT+GET+ACK) to run per second
+        static int totalRps = 1000; // total number of full rounds (PUT+GET+ACK) to run per second
         static bool go_on = true;
 
         static async Task TestGet()
@@ -85,11 +89,12 @@ namespace H2Runner
 
             while (go_on)
             {
-                while (rps.GetRps() > totalRps) await Task.Delay(1);
+                while (z > totalRps) await Task.Delay(1);
+                //while (rps.GetRps() > totalRps) await Task.Delay(1);
                 Interlocked.Increment(ref z);
                 var (queueName, partition, selector) = generateQueue();
                 var start = DateTime.Now;
-                rps.Hit();
+                //rps.Hit();
                 requestCount++;
                 _ = pgq.Get(queueName, partition, selector).ContinueWith(async t =>
                     {
@@ -127,11 +132,12 @@ namespace H2Runner
 
             while (go_on)
             {
-                while (rps.GetRps() > totalRps) await Task.Delay(1);
+                while (z > totalRps) await Task.Delay(1);
+                //while (rps.GetRps() > totalRps) await Task.Delay(1);
                 Interlocked.Increment(ref z);
                 var (queueName, partition, selector) = generateQueue();
                 var start = DateTime.Now;
-                rps.Hit();
+                //rps.Hit();
                 requestCount++;
                 _ = pgq.Put(queueName, partition, selector, Guid.NewGuid())
                     .ContinueWith(t => { Interlocked.Decrement(ref z); lens.Add(DateTime.Now - start); });
@@ -157,25 +163,37 @@ namespace H2Runner
 
     public class RpsMeter
     {
-        List<DateTime> hits = new();
+        class V
+        {
+            public long mill;
+            public int cnt;
+        }
+
+        readonly List<V> buckets = new() { new V { mill = 0, cnt = 0 } };
+        readonly Stopwatch sw = Stopwatch.StartNew();
+        int S = 0;
 
         public void Hit()
         {
-            lock (hits)
+            lock (buckets)
             {
-                hits.Add(DateTime.Now);
-                if (hits.Count > 10_000)
-                    hits.RemoveAt(0);
+                var i = sw.ElapsedMilliseconds;
+                if (buckets[^1].mill == i)
+                    buckets[^1].cnt++;
+                else
+                    buckets.Add(new V { mill = i, cnt = 1 });
+                S++;
+                while (buckets.Count > 1000)
+                {
+                    S -= buckets[0].cnt;
+                    buckets.RemoveAt(0);
+                }
             }
         }
-
-        public double GetRps(double msAdvance = 0)
+        public double GetRps()
         {
-            lock (hits)
-            {
-                if (hits.Count < 2) return 0;
-                return hits.Count / (DateTime.Now.AddMilliseconds(msAdvance) - hits[0]).TotalSeconds;
-            }
+            lock (buckets)
+                return 1000.0 * S / (sw.ElapsedMilliseconds - buckets[0].mill);
         }
     }
 }

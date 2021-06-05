@@ -1,11 +1,12 @@
 ﻿apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: pgq
   labels:
     app: pgq
 spec:
   replicas: 4
+  serviceName: pgq
   selector:
     matchLabels:
       app: pgq
